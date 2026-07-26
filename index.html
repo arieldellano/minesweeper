@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0b0f1f">
+<title>Minesweeper</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<canvas id="fx"></canvas>
+<div id="app">
+  <h1>Minesweeper</h1>
+  <div class="difficulty-bar">
+    <button data-diff="beginner">Beginner</button>
+    <button data-diff="intermediate">Intermediate</button>
+    <button data-diff="expert">Expert</button>
+  </div>
+  <div class="card">
+    <div class="header">
+      <div class="led"><span class="ico">💣</span><div class="counter" id="mine-counter"></div></div>
+      <button class="reset-btn" id="reset-btn" title="New game" aria-label="New game"><span class="face" id="reset-face">🙂</span></button>
+      <div class="led"><span class="ico">⏱️</span><div class="counter" id="timer"></div></div>
+    </div>
+    <div class="board-container"><div class="board" id="board"></div></div>
+    <div class="statusbar">
+      <div class="sb-left">
+        <button class="icon-btn" id="snd-btn" title="Toggle sound" aria-label="Toggle sound">🔊</button>
+        <div class="status" id="status"></div>
+      </div>
+      <div class="best" id="best"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ES modules require an http(s) origin. Run a local server, e.g.:
+       python3 -m http.server
+     then open http://localhost:8000/  (opening the file directly will not work). -->
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

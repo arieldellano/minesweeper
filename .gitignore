@@ -1,0 +1,6 @@
+# macOS
+.DS_Store
+
+# Python (serve.py bytecode cache)
+__pycache__/
+*.pyc
