@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { BoardConfig, DifficultyName, GameState } from '@/lib/types';
 import { DEFAULT_CUSTOM, DIFFICULTIES, getConfig } from '@/lib/difficulty';
-import { chord as chordFn, createGame, cycleFlag, revealCell } from '@/lib/game';
+import { chord as chordFn, clearTransientFlags, createGame, cycleFlag, revealCell } from '@/lib/game';
 import {
   getBest,
   loadCustomConfig,
@@ -32,16 +32,24 @@ export interface UseGame {
   winNonce: number;
   defaultDifficulty: DifficultyName;
   solvableOnly: boolean;
+  undoEnabled: boolean;
+  canUndo: boolean;
   newGame: (difficulty: DifficultyName) => void;
   startCustom: (rows: number, cols: number, mines: number) => void;
   reveal: (r: number, c: number) => void;
   chord: (r: number, c: number) => void;
   toggleFlag: (r: number, c: number) => void;
+  undo: () => void;
   toggleMute: () => void;
   setDefaultDifficulty: (difficulty: DifficultyName) => void;
   setSolvableOnly: (value: boolean) => void;
+  setUndoEnabled: (value: boolean) => void;
   refreshBest: () => void;
 }
+
+// How many moves back undo can reach. Snapshots share their untouched rows with
+// the live grid (copy-on-write), so a deep stack stays cheap.
+const MAX_UNDO = 100;
 
 export function useGame(): UseGame {
   const [state, setState] = useState<GameState>(() =>
@@ -55,6 +63,8 @@ export function useGame(): UseGame {
   const [winNonce, setWinNonce] = useState(0);
   const [defaultDifficulty, setDefaultDifficultyState] = useState<DifficultyName>('beginner');
   const [solvableOnly, setSolvableOnlyState] = useState(true);
+  const [undoEnabled, setUndoEnabledState] = useState(true);
+  const [canUndo, setCanUndo] = useState(false);
 
   // Refs so the stable action callbacks always see the latest values.
   const stateRef = useRef(state);
@@ -67,6 +77,11 @@ export function useGame(): UseGame {
   solvableOnlyRef.current = solvableOnly;
   const defaultDifficultyRef = useRef(defaultDifficulty);
   defaultDifficultyRef.current = defaultDifficulty;
+  const undoEnabledRef = useRef(undoEnabled);
+  undoEnabledRef.current = undoEnabled;
+  // Undo stack of pre-move snapshots. In-memory only: a reload restores the
+  // board but not its history.
+  const historyRef = useRef<GameState[]>([]);
   const gameIdRef = useRef(0);
   const hydratedRef = useRef(false);
   // Cached restore payload. `undefined` = not attempted yet; read exactly once so
@@ -83,6 +98,30 @@ export function useGame(): UseGame {
     setState(next);
   }, []);
 
+  // ---- Undo history --------------------------------------------------------
+  // Record the state a move is about to replace. Called only once the move is
+  // known to have changed something, so undo never burns on a no-op click.
+  const pushHistory = useCallback((snapshot: GameState) => {
+    if (!undoEnabledRef.current) return;
+    const stack = historyRef.current;
+    stack.push(snapshot);
+    if (stack.length > MAX_UNDO) stack.shift();
+    setCanUndo(true);
+  }, []);
+
+  const resetHistory = useCallback(() => {
+    historyRef.current = [];
+    setCanUndo(false);
+  }, []);
+
+  const persistSettings = useCallback(() => {
+    saveSettings({
+      defaultDifficulty: defaultDifficultyRef.current,
+      solvableOnly: solvableOnlyRef.current,
+      undoEnabled: undoEnabledRef.current,
+    });
+  }, []);
+
   // ---- Mount: load prefs, restore a saved game, wire audio unlock ----------
   useEffect(() => {
     const m = loadMuted();
@@ -95,6 +134,8 @@ export function useGame(): UseGame {
     setDefaultDifficultyState(settings.defaultDifficulty);
     setSolvableOnlyState(settings.solvableOnly);
     solvableOnlyRef.current = settings.solvableOnly;
+    setUndoEnabledState(settings.undoEnabled);
+    undoEnabledRef.current = settings.undoEnabled;
 
     // Only restore a board the player has actually engaged with (revealed or
     // flagged). An untouched board is discarded so the default difficulty applies.
@@ -188,13 +229,14 @@ export function useGame(): UseGame {
   const startBoard = useCallback(
     (difficulty: DifficultyName, config: BoardConfig, silent = false) => {
       const next = createGame(difficulty, config, nextGameId(), solvableOnlyRef.current);
+      resetHistory(); // undo never reaches back into a previous board
       apply(next);
       setBestState(getBest(difficulty, customRef.current));
       setIsNewBest(false);
       setDealNonce((n) => n + 1);
       if (!silent) sound.newgame();
     },
-    [apply]
+    [apply, resetHistory]
   );
 
   const newGame = useCallback(
@@ -223,10 +265,11 @@ export function useGame(): UseGame {
       if (cell.revealed || cell.flagged !== 0) return;
       const next = revealCell(prev, r, c);
       if (next === prev) return;
+      pushHistory(prev);
       apply(next);
       if (!next.gameOver) sound.reveal();
     },
-    [apply]
+    [apply, pushHistory]
   );
 
   const chord = useCallback(
@@ -235,10 +278,11 @@ export function useGame(): UseGame {
       if (prev.gameOver) return;
       const next = chordFn(prev, r, c);
       if (next === prev) return;
+      pushHistory(prev); // one snapshot per chord: undo takes back the whole opening
       apply(next);
       if (!next.gameOver) sound.reveal();
     },
-    [apply]
+    [apply, pushHistory]
   );
 
   const toggleFlag = useCallback(
@@ -246,14 +290,33 @@ export function useGame(): UseGame {
       const prev = stateRef.current;
       const next = cycleFlag(prev, r, c);
       if (next === prev) return;
+      pushHistory(prev);
       apply(next);
       const f = next.grid[r][c].flagged;
       if (f === 1) sound.flag();
       else if (f === 2) sound.question();
       else sound.unflag();
     },
-    [apply]
+    [apply, pushHistory]
   );
+
+  // Step back one move — including the fatal click, which is the whole point.
+  // The clock is deliberately not rewound: undoing a mistake shouldn't hand back
+  // the time it cost.
+  const undo = useCallback(() => {
+    if (!undoEnabledRef.current) return;
+    const stack = historyRef.current;
+    const snapshot = stack.pop();
+    if (!snapshot) return;
+    setCanUndo(stack.length > 0);
+    apply({
+      ...snapshot,
+      grid: clearTransientFlags(snapshot.grid),
+      timer: stateRef.current.timer,
+    });
+    setIsNewBest(false);
+    sound.undo();
+  }, [apply]);
 
   const toggleMute = useCallback(() => {
     const nextMuted = !mutedRef.current;
@@ -266,8 +329,9 @@ export function useGame(): UseGame {
 
   const setDefaultDifficulty = useCallback(
     (difficulty: DifficultyName) => {
+      defaultDifficultyRef.current = difficulty;
       setDefaultDifficultyState(difficulty);
-      saveSettings({ defaultDifficulty: difficulty, solvableOnly: solvableOnlyRef.current });
+      persistSettings();
       // If the current board is untouched, switch to the new default right away so
       // the choice is visible immediately (a started game is left alone).
       const cur = stateRef.current;
@@ -275,22 +339,37 @@ export function useGame(): UseGame {
         startBoard(difficulty, getConfig(difficulty, customRef.current), true);
       }
     },
-    [startBoard]
+    [persistSettings, startBoard]
   );
 
-  const setSolvableOnly = useCallback((value: boolean) => {
-    solvableOnlyRef.current = value;
-    setSolvableOnlyState(value);
-    saveSettings({ defaultDifficulty: defaultDifficultyRef.current, solvableOnly: value });
-    // Apply to the current board if its mines haven't been placed yet, so the
-    // toggle takes effect on the very next click without needing a new game.
-    setState((prev) => {
-      if (prev.minesPlaced || prev.solvableOnly === value) return prev;
-      const next = { ...prev, solvableOnly: value };
-      stateRef.current = next;
-      return next;
-    });
-  }, []);
+  const setSolvableOnly = useCallback(
+    (value: boolean) => {
+      solvableOnlyRef.current = value;
+      setSolvableOnlyState(value);
+      persistSettings();
+      // Apply to the current board if its mines haven't been placed yet, so the
+      // toggle takes effect on the very next click without needing a new game.
+      setState((prev) => {
+        if (prev.minesPlaced || prev.solvableOnly === value) return prev;
+        const next = { ...prev, solvableOnly: value };
+        stateRef.current = next;
+        return next;
+      });
+    },
+    [persistSettings]
+  );
+
+  const setUndoEnabled = useCallback(
+    (value: boolean) => {
+      undoEnabledRef.current = value;
+      setUndoEnabledState(value);
+      persistSettings();
+      // Drop the stack when switching off, so re-enabling can't undo across the
+      // moves made while it was disabled.
+      if (!value) resetHistory();
+    },
+    [persistSettings, resetHistory]
+  );
 
   // Re-read the best time for the current difficulty (e.g. after clearing records).
   const refreshBest = useCallback(() => {
@@ -308,14 +387,18 @@ export function useGame(): UseGame {
     winNonce,
     defaultDifficulty,
     solvableOnly,
+    undoEnabled,
+    canUndo,
     newGame,
     startCustom,
     reveal,
     chord,
     toggleFlag,
+    undo,
     toggleMute,
     setDefaultDifficulty,
     setSolvableOnly,
+    setUndoEnabled,
     refreshBest,
   };
 }

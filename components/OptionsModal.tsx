@@ -1,7 +1,8 @@
 'use client';
 
-// Options dialog: default difficulty, sound, "generate solvable games only", and
-// a read-out of the best times per preset difficulty (with a clear action).
+// Options dialog: default difficulty, sound, "generate solvable games only",
+// undo, and a read-out of the best times per preset difficulty (with a clear
+// action).
 // Matches the card + modal look. Rendered only while open.
 
 import { useCallback, useEffect, useState } from 'react';
@@ -16,10 +17,12 @@ interface OptionsModalProps {
   defaultDifficulty: DifficultyName;
   muted: boolean;
   solvableOnly: boolean;
+  undoEnabled: boolean;
   onClose: () => void;
   onChangeDefault: (difficulty: DifficultyName) => void;
   onToggleSound: () => void;
   onToggleSolvable: (value: boolean) => void;
+  onToggleUndo: (value: boolean) => void;
   onRecordsCleared: () => void;
 }
 
@@ -37,10 +40,12 @@ export function OptionsModal({
   defaultDifficulty,
   muted,
   solvableOnly,
+  undoEnabled,
   onClose,
   onChangeDefault,
   onToggleSound,
   onToggleSolvable,
+  onToggleUndo,
   onRecordsCleared,
 }: OptionsModalProps) {
   const [records, setRecords] = useState<Record<string, number | null>>({});
@@ -113,6 +118,14 @@ export function OptionsModal({
             <small>No-guess boards</small>
           </div>
           <Toggle checked={solvableOnly} onChange={onToggleSolvable} label="Generate solvable games only" />
+        </div>
+
+        <div className="opt-row">
+          <div className="opt-label">
+            <span>Undo</span>
+            <small>Take back your last move — even a fatal one</small>
+          </div>
+          <Toggle checked={undoEnabled} onChange={onToggleUndo} label="Undo" />
         </div>
 
         <div className="opt-records">

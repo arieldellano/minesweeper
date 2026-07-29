@@ -41,6 +41,9 @@ The ⚙️ button (status bar) opens an options dialog:
 - **Sound** — on/off, synced with the 🔊 quick toggle.
 - **Generate solvable games only** — on by default; when off, mine layouts are
   purely random (first click still safe) and may require guessing.
+- **Undo** — on by default; adds an ↩️ button to the status bar (and Ctrl/⌘+Z)
+  that takes back the last move — a reveal, a flag, a chord, or the fatal click
+  that ended the game. See below.
 - **Best times** — the record for each preset difficulty, with a clear action.
 
 Settings persist in `localStorage`. A saved game is only restored when it has
@@ -87,6 +90,20 @@ move and each timer tick, and restored on load — board, flags, mine counter,
 elapsed time and win/lose status all come back, and an in-progress timer resumes.
 The grid is stored compactly as digit strings and adjacency counts are recomputed
 on load. Starting a new game or switching difficulty overwrites the save.
+
+## Undo
+
+`hooks/useGame.ts` keeps a stack of pre-move snapshots (up to 100), pushed only
+once a move is known to have changed something — so undo never burns on a no-op
+click. One chord is one snapshot, so a single undo takes back the whole opening.
+Snapshots are cheap: the copy-on-write transitions mean each one shares its
+untouched rows with the live grid.
+
+Restoring strips the one-shot animation markers (`exploded` / `wrongFlag` /
+`popped`) so nothing replays, and deliberately keeps the *current* timer —
+undoing a mistake shouldn't hand back the time it cost. The stack is in memory
+only: a reload restores the board but not its history, and starting a new game
+or turning the option off clears it.
 
 ## Solvable boards (no guessing)
 

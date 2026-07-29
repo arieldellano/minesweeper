@@ -290,6 +290,32 @@ function maybeWin(state: GameState): GameState {
   return { ...state, grid: ed.grid, gameOver: true, won: true, flagsPlaced };
 }
 
+// ---- Undo support --------------------------------------------------------
+// Strip the one-shot animation markers from a grid. Used when an undo restores
+// an earlier snapshot: those cells already played their pop/explosion, and a
+// rewound board is no longer a lost one, so nothing should replay. Non-mutating
+// (snapshots share rows with the live grid) and reference-preserving, so
+// untouched rows/cells stay memoized.
+export function clearTransientFlags(grid: CellState[][]): CellState[][] {
+  let gridTouched = false;
+  const next = grid.map((row) => {
+    let rowTouched = false;
+    const nextRow = row.map((cell) => {
+      if (!cell.exploded && !cell.wrongFlag && !cell.popped) return cell;
+      rowTouched = true;
+      const copy = { ...cell };
+      delete copy.exploded;
+      delete copy.wrongFlag;
+      delete copy.popped;
+      return copy;
+    });
+    if (!rowTouched) return row;
+    gridTouched = true;
+    return nextRow;
+  });
+  return gridTouched ? next : grid;
+}
+
 // Which unrevealed non-mine neighbors a chord would open (for the press preview).
 export function chordPreviewCells(
   state: GameState,

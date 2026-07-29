@@ -118,4 +118,5 @@ export const sound = {
   win: () =>
     [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.2, 'triangle', 0.25, null, i * 0.12)),
   newgame: () => tone(400, 0.08, 'sine', 0.12, 620),
+  undo: () => tone(560, 0.09, 'triangle', 0.13, 300), // downward "rewind" blip
 };

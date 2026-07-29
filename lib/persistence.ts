@@ -14,6 +14,7 @@ const SETTINGS_KEY = 'minesweeper.settings';
 export const DEFAULT_SETTINGS: Settings = {
   defaultDifficulty: 'beginner',
   solvableOnly: true,
+  undoEnabled: true,
 };
 
 function ls(): Storage | null {
@@ -104,7 +105,7 @@ export function saveMuted(muted: boolean): void {
   }
 }
 
-// ---- Settings (default difficulty, solvable-only) -------------------------
+// ---- Settings (default difficulty, solvable-only, undo) -------------------
 export function loadSettings(): Settings {
   const store = ls();
   if (!store) return { ...DEFAULT_SETTINGS };
@@ -117,6 +118,7 @@ export function loadSettings(): Settings {
     return {
       defaultDifficulty: valid ? dd : DEFAULT_SETTINGS.defaultDifficulty,
       solvableOnly: typeof parsed.solvableOnly === 'boolean' ? parsed.solvableOnly : true,
+      undoEnabled: typeof parsed.undoEnabled === 'boolean' ? parsed.undoEnabled : true,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

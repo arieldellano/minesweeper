@@ -3,7 +3,10 @@ import { pad3 } from '@/lib/format';
 
 interface StatusBarProps {
   muted: boolean;
+  undoEnabled: boolean;
+  canUndo: boolean;
   onToggleMute: () => void;
+  onUndo: () => void;
   onOpenOptions: () => void;
   statusText: string;
   statusClass: '' | 'win' | 'lose';
@@ -14,7 +17,10 @@ interface StatusBarProps {
 
 export function StatusBar({
   muted,
+  undoEnabled,
+  canUndo,
   onToggleMute,
+  onUndo,
   onOpenOptions,
   statusText,
   statusClass,
@@ -33,6 +39,17 @@ export function StatusBar({
         >
           {muted ? '🔇' : '🔊'}
         </button>
+        {undoEnabled && (
+          <button
+            className="icon-btn"
+            title="Undo last move (Ctrl/⌘ + Z)"
+            aria-label="Undo last move"
+            onClick={onUndo}
+            disabled={!canUndo}
+          >
+            ↩️
+          </button>
+        )}
         <button
           className="icon-btn"
           title="Options"

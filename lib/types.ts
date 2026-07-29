@@ -47,4 +47,6 @@ export interface GameState {
 export interface Settings {
   defaultDifficulty: DifficultyName;
   solvableOnly: boolean;
+  // Whether the "Undo" control is available (takes back the last move).
+  undoEnabled: boolean;
 }

@@ -56,10 +56,17 @@ export function Minesweeper() {
   }, [game.dealNonce]);
   const endDeal = useCallback(() => setDealing(false), []);
 
-  // Keyboard: R restarts the current difficulty (ignored while the modal is up).
+  // Keyboard: R restarts the current difficulty, Ctrl/⌘+Z undoes the last move
+  // (both ignored while a modal is up).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.key === 'r' || e.key === 'R') && !modalOpen && !optionsOpen) game.newGame(state.difficulty);
+      if (modalOpen || optionsOpen) return;
+      if ((e.key === 'z' || e.key === 'Z') && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        game.undo();
+        return;
+      }
+      if (e.key === 'r' || e.key === 'R') game.newGame(state.difficulty);
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -117,7 +124,10 @@ export function Minesweeper() {
           />
           <StatusBar
             muted={game.muted}
+            undoEnabled={game.undoEnabled}
+            canUndo={game.canUndo}
             onToggleMute={game.toggleMute}
+            onUndo={game.undo}
             onOpenOptions={() => setOptionsOpen(true)}
             statusText={statusText}
             statusClass={statusClass}
@@ -141,10 +151,12 @@ export function Minesweeper() {
         defaultDifficulty={game.defaultDifficulty}
         muted={game.muted}
         solvableOnly={game.solvableOnly}
+        undoEnabled={game.undoEnabled}
         onClose={() => setOptionsOpen(false)}
         onChangeDefault={game.setDefaultDifficulty}
         onToggleSound={game.toggleMute}
         onToggleSolvable={game.setSolvableOnly}
+        onToggleUndo={game.setUndoEnabled}
         onRecordsCleared={game.refreshBest}
       />
     </>
