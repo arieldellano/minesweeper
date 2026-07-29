@@ -2,7 +2,15 @@
 // best times, and the last-used custom board. All client-only and defensively
 // wrapped so private-mode / disabled storage just plays without persistence.
 
-import type { BoardConfig, CellState, DifficultyName, GameState, Settings } from './types';
+import type {
+  BestRecord,
+  BoardConfig,
+  CellState,
+  DifficultyName,
+  GameState,
+  Settings,
+} from './types';
+import { MAX_NAME_LENGTH } from './types';
 import { DIFFICULTIES, DEFAULT_CUSTOM, clampCustom, getConfig } from './difficulty';
 import { computeAdjacency } from './game';
 
@@ -10,10 +18,12 @@ const SAVE_KEY = 'minesweeper.save';
 const CUSTOM_KEY = 'minesweeper.custom';
 const MUTED_KEY = 'minesweeper.muted';
 const SETTINGS_KEY = 'minesweeper.settings';
+const PLAYER_KEY = 'minesweeper.player';
 
 export const DEFAULT_SETTINGS: Settings = {
   defaultDifficulty: 'beginner',
   solvableOnly: true,
+  guaranteeOpening: false,
   undoEnabled: true,
 };
 
@@ -63,22 +73,85 @@ function bestKey(difficulty: DifficultyName, custom: BoardConfig): string {
   return `minesweeper.best.${difficulty}`;
 }
 
-export function getBest(difficulty: DifficultyName, custom: BoardConfig): number | null {
-  const store = ls();
-  if (!store) return null;
+// Trim a player-supplied name to something storable. Returns null for anything
+// blank, so "no name" has exactly one representation.
+export function normalizeName(name: string): string | null {
+  const clean = name.trim().replace(/\s+/g, ' ').slice(0, MAX_NAME_LENGTH);
+  return clean || null;
+}
+
+// Records are stored as {"t":time,"n":name}. Records written before names
+// existed are a bare number string, and still read fine as anonymous.
+function parseBest(raw: string | null): BestRecord | null {
+  if (!raw) return null;
+  const legacy = Number(raw);
+  if (Number.isFinite(legacy)) return { time: legacy, name: null };
   try {
-    const v = store.getItem(bestKey(difficulty, custom));
-    return v ? parseInt(v, 10) : null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed.t !== 'number' || !Number.isFinite(parsed.t)) return null;
+    return { time: parsed.t, name: typeof parsed.n === 'string' ? normalizeName(parsed.n) : null };
   } catch {
     return null;
   }
 }
 
-export function setBest(difficulty: DifficultyName, custom: BoardConfig, time: number): void {
+export function getBest(difficulty: DifficultyName, custom: BoardConfig): BestRecord | null {
+  const store = ls();
+  if (!store) return null;
+  try {
+    return parseBest(store.getItem(bestKey(difficulty, custom)));
+  } catch {
+    return null;
+  }
+}
+
+export function setBest(
+  difficulty: DifficultyName,
+  custom: BoardConfig,
+  time: number,
+  name: string | null = null
+): void {
   const store = ls();
   if (!store) return;
   try {
-    store.setItem(bestKey(difficulty, custom), String(time));
+    store.setItem(bestKey(difficulty, custom), JSON.stringify({ t: time, n: name }));
+  } catch {
+    /* ignore */
+  }
+}
+
+// Attach a name to an already-saved record. Guarded on the time so a stale
+// prompt can never relabel a record someone else has since beaten.
+export function setBestName(
+  difficulty: DifficultyName,
+  custom: BoardConfig,
+  time: number,
+  name: string | null
+): boolean {
+  const current = getBest(difficulty, custom);
+  if (!current || current.time !== time) return false;
+  setBest(difficulty, custom, time, name);
+  return true;
+}
+
+// ---- Player name (prefilled into the new-record prompt) -------------------
+export function loadPlayerName(): string {
+  const store = ls();
+  if (!store) return '';
+  try {
+    return normalizeName(store.getItem(PLAYER_KEY) || '') || '';
+  } catch {
+    return '';
+  }
+}
+
+export function savePlayerName(name: string): void {
+  const store = ls();
+  if (!store) return;
+  try {
+    const clean = normalizeName(name);
+    if (clean) store.setItem(PLAYER_KEY, clean);
+    else store.removeItem(PLAYER_KEY);
   } catch {
     /* ignore */
   }
@@ -118,6 +191,8 @@ export function loadSettings(): Settings {
     return {
       defaultDifficulty: valid ? dd : DEFAULT_SETTINGS.defaultDifficulty,
       solvableOnly: typeof parsed.solvableOnly === 'boolean' ? parsed.solvableOnly : true,
+      guaranteeOpening:
+        typeof parsed.guaranteeOpening === 'boolean' ? parsed.guaranteeOpening : false,
       undoEnabled: typeof parsed.undoEnabled === 'boolean' ? parsed.undoEnabled : true,
     };
   } catch {
@@ -161,6 +236,7 @@ interface SavePayload {
   gameOver: boolean;
   won: boolean;
   solvableOnly: boolean;
+  guaranteeOpening?: boolean;
   mines: string | null;
   revealed: string;
   flagged: string;
@@ -195,6 +271,7 @@ export function saveGame(state: GameState): void {
       gameOver: state.gameOver,
       won: state.won,
       solvableOnly: state.solvableOnly,
+      guaranteeOpening: state.guaranteeOpening,
       mines: state.minesPlaced ? mines : null,
       revealed,
       flagged,
@@ -285,6 +362,7 @@ export function loadGame(gameId: number): GameState | null {
     gameOver: !!data.gameOver,
     won: !!data.won,
     solvableOnly: typeof data.solvableOnly === 'boolean' ? data.solvableOnly : true,
+    guaranteeOpening: typeof data.guaranteeOpening === 'boolean' ? data.guaranteeOpening : false,
     gameId,
   };
 }

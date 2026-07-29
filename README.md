@@ -41,10 +41,15 @@ The ⚙️ button (status bar) opens an options dialog:
 - **Sound** — on/off, synced with the 🔊 quick toggle.
 - **Generate solvable games only** — on by default; when off, mine layouts are
   purely random (first click still safe) and may require guessing.
+- **Guarantee an opening region** — **off** by default. When off, only the tile
+  you click is kept mine-free, so an opening click can land on a number and
+  reveals just that tile. When on, its whole 3×3 is kept clear, forcing a blank
+  opening that floods a region open. See below.
 - **Undo** — on by default; adds an ↩️ button to the status bar (and Ctrl/⌘+Z)
   that takes back the last move — a reveal, a flag, a chord, or the fatal click
   that ended the game. See below.
-- **Best times** — the record for each preset difficulty, with a clear action.
+- **Best times** — the record for each preset difficulty and who set it, with a
+  clear action. See below.
 
 Settings persist in `localStorage`. A saved game is only restored when it has
 actually been started (a cell revealed or flagged), so the default difficulty
@@ -63,7 +68,7 @@ framework-free TypeScript in `lib/`.
 | `lib/difficulty.ts`         | Presets, custom limits, clamping, config resolution.                      |
 | `lib/game.ts`               | Pure rules as state transitions: reveal, chord, flag, win/lose (copy-on-write). |
 | `lib/solver.ts`             | No-guess solvability check (trivial + tank + count deductions).           |
-| `lib/persistence.ts`        | `localStorage` save/restore, best times, custom config, mute.             |
+| `lib/persistence.ts`        | `localStorage` save/restore, named best times, custom config, mute.       |
 | `lib/sound.ts`              | Web Audio sound effects (synthesized, no assets).                         |
 | `lib/format.ts`             | LED 3-digit formatting.                                                    |
 | `hooks/useGame.ts`          | Owns game state, timer, persistence, sound, best times, deal/confetti triggers. |
@@ -73,6 +78,7 @@ framework-free TypeScript in `lib/`.
 | `components/Cell.tsx`       | Memoized single cell (only changed cells re-render).                      |
 | `components/Header.tsx`, `SevenSeg.tsx`, `DifficultyBar.tsx`, `StatusBar.tsx` | Header LEDs + reset, seven-segment display, difficulty control, status bar. |
 | `components/CustomModal.tsx`| The custom-board dialog.                                                   |
+| `components/RecordModal.tsx`| The new-record dialog that asks who set it.                                |
 | `components/DealCanvas.tsx`, `Confetti.tsx` | Canvas entrance animation and win confetti.               |
 
 ## Idiomatic React, but fast
@@ -91,6 +97,46 @@ elapsed time and win/lose status all come back, and an in-progress timer resumes
 The grid is stored compactly as digit strings and adjacency counts are recomputed
 on load. Starting a new game or switching difficulty overwrites the save.
 
+## The opening click
+
+A tile only opens its region when it has no mines around it; a numbered tile
+uncovers just itself. Which of those the *first* click does is governed by
+**Guarantee an opening region** (off by default):
+
+| Option | Safe on first click | Opening tile |
+| --- | --- | --- |
+| Off (default) | the clicked tile only | often a number → reveals just that tile |
+| On | the clicked tile and all 8 neighbors | always a 0 → floods a region open |
+
+**These two options fight each other, and solvable-only wins.** A no-guess board
+needs a blank opening: `isSolvable` reveals the start cell and deduces outward,
+and a lone number gives one constraint over 8 unknowns, from which nothing is
+forced. So layouts with a numbered opening are rejected and regenerated.
+Measured over 120 boards per difficulty with solvable-only **on** and the opening
+guarantee **off**, numbered first clicks came out at 0% / 0% / 2%
+(beginner / intermediate / expert) — the generator filters right back to blank
+openings. Turn **off** "Generate solvable games only" and they appear 62% / 74% /
+86% of the time.
+
+That 2% on expert is the generator exhausting its 400-attempt cap and falling
+back to an unfiltered layout, which may then require a guess. First-click cost
+stays small either way (expert median 1.9 ms, worst seen 11.3 ms).
+
+## Records and who set them
+
+Beating the standing best time (or setting the first one) pops a **New Record!**
+dialog asking for a name, which is then shown beside the time in the options
+dialog and next to the 🏆 readout. The last name used is remembered and
+prefilled, so a regular player just hits Save.
+
+The time is banked *before* the prompt appears, so skipping it — Escape, the
+Skip button, or clicking away — loses the name, never the record; those show as
+"Anonymous". Names are trimmed and capped at 14 characters. Records written
+before name tracking existed were bare numbers in `localStorage`; they still
+load, as anonymous, and are rewritten in the new `{"t":time,"n":name}` shape the
+next time they're beaten. Attaching a name is guarded on the time, so a stale
+prompt can't relabel a record that has since been beaten.
+
 ## Undo
 
 `hooks/useGame.ts` keeps a stack of pre-move snapshots (up to 100), pushed only
@@ -107,7 +153,7 @@ or turning the option off clears it.
 
 ## Solvable boards (no guessing)
 
-Mines are placed on the first click, keeping that cell and its neighbors safe.
+Mines are placed on the first click, always keeping the clicked tile itself safe.
 The layout is then regenerated until `lib/solver.ts` confirms it can be solved by
 pure logic — so the player never needs to guess. The solver escalates only as
 needed: trivial per-number rules, then a "tank" constraint enumeration over

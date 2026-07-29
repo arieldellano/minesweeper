@@ -1,4 +1,5 @@
 import { RefObject } from 'react';
+import type { BestRecord } from '@/lib/types';
 import { pad3 } from '@/lib/format';
 
 interface StatusBarProps {
@@ -10,7 +11,7 @@ interface StatusBarProps {
   onOpenOptions: () => void;
   statusText: string;
   statusClass: '' | 'win' | 'lose';
-  best: number | null;
+  best: BestRecord | null;
   isNewBest: boolean;
   rootRef: RefObject<HTMLDivElement | null>;
 }
@@ -65,7 +66,8 @@ export function StatusBar({
           '🏆 Best: --'
         ) : (
           <>
-            🏆 Best: {pad3(best)}
+            🏆 Best: {pad3(best.time)}
+            {best.name && <span className="best-holder">{best.name}</span>}
             {isNewBest && <span className="new-best">NEW!</span>}
           </>
         )}

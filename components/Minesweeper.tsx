@@ -16,6 +16,7 @@ import { CustomModal } from './CustomModal';
 import { DifficultyBar } from './DifficultyBar';
 import { Header } from './Header';
 import { OptionsModal } from './OptionsModal';
+import { RecordModal } from './RecordModal';
 import { StatusBar } from './StatusBar';
 
 function prefersReducedMotion(): boolean {
@@ -57,10 +58,12 @@ export function Minesweeper() {
   const endDeal = useCallback(() => setDealing(false), []);
 
   // Keyboard: R restarts the current difficulty, Ctrl/⌘+Z undoes the last move
-  // (both ignored while a modal is up).
+  // (both ignored while a modal is up — otherwise typing a name would restart
+  // the game).
+  const anyModalOpen = modalOpen || optionsOpen || game.pendingRecord !== null;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (modalOpen || optionsOpen) return;
+      if (anyModalOpen) return;
       if ((e.key === 'z' || e.key === 'Z') && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         game.undo();
@@ -70,7 +73,7 @@ export function Minesweeper() {
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [game, state.difficulty, modalOpen, optionsOpen]);
+  }, [game, state.difficulty, anyModalOpen]);
 
   const face = state.won ? '😎' : state.gameOver ? '😵' : pressing ? '😮' : '🙂';
   let statusText: string;
@@ -151,13 +154,21 @@ export function Minesweeper() {
         defaultDifficulty={game.defaultDifficulty}
         muted={game.muted}
         solvableOnly={game.solvableOnly}
+        guaranteeOpening={game.guaranteeOpening}
         undoEnabled={game.undoEnabled}
         onClose={() => setOptionsOpen(false)}
         onChangeDefault={game.setDefaultDifficulty}
         onToggleSound={game.toggleMute}
         onToggleSolvable={game.setSolvableOnly}
+        onToggleOpening={game.setGuaranteeOpening}
         onToggleUndo={game.setUndoEnabled}
         onRecordsCleared={game.refreshBest}
+      />
+      <RecordModal
+        record={game.pendingRecord}
+        initialName={game.playerName}
+        onSubmit={game.nameRecord}
+        onSkip={game.skipRecordName}
       />
     </>
   );

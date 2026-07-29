@@ -6,7 +6,7 @@
 // Matches the card + modal look. Rendered only while open.
 
 import { useCallback, useEffect, useState } from 'react';
-import type { DifficultyName } from '@/lib/types';
+import type { BestRecord, DifficultyName } from '@/lib/types';
 import { DIFFICULTIES } from '@/lib/difficulty';
 import { pad3 } from '@/lib/format';
 import { clearBests, getBest } from '@/lib/persistence';
@@ -17,11 +17,13 @@ interface OptionsModalProps {
   defaultDifficulty: DifficultyName;
   muted: boolean;
   solvableOnly: boolean;
+  guaranteeOpening: boolean;
   undoEnabled: boolean;
   onClose: () => void;
   onChangeDefault: (difficulty: DifficultyName) => void;
   onToggleSound: () => void;
   onToggleSolvable: (value: boolean) => void;
+  onToggleOpening: (value: boolean) => void;
   onToggleUndo: (value: boolean) => void;
   onRecordsCleared: () => void;
 }
@@ -40,18 +42,20 @@ export function OptionsModal({
   defaultDifficulty,
   muted,
   solvableOnly,
+  guaranteeOpening,
   undoEnabled,
   onClose,
   onChangeDefault,
   onToggleSound,
   onToggleSolvable,
+  onToggleOpening,
   onToggleUndo,
   onRecordsCleared,
 }: OptionsModalProps) {
-  const [records, setRecords] = useState<Record<string, number | null>>({});
+  const [records, setRecords] = useState<Record<string, BestRecord | null>>({});
 
   const readRecords = useCallback(() => {
-    const next: Record<string, number | null> = {};
+    const next: Record<string, BestRecord | null> = {};
     // custom is excluded (its bests are keyed by dimensions); the custom arg is
     // unused for presets.
     for (const d of PRESETS) next[d] = getBest(d, { rows: 0, cols: 0, mines: 0, label: '' });
@@ -122,6 +126,26 @@ export function OptionsModal({
 
         <div className="opt-row">
           <div className="opt-label">
+            <span>Guarantee an opening region</span>
+            <small>First click always opens a blank area</small>
+          </div>
+          <Toggle
+            checked={guaranteeOpening}
+            onChange={onToggleOpening}
+            label="Guarantee an opening region"
+          />
+        </div>
+        {/* Without this the option looks broken: a no-guess board needs a blank
+            opening to deduce from, so the generator produces one regardless. */}
+        {!guaranteeOpening && solvableOnly && (
+          <p className="opt-note">
+            No-guess boards always open a blank area anyway. Turn off “Generate solvable games
+            only” to get numbered first clicks.
+          </p>
+        )}
+
+        <div className="opt-row">
+          <div className="opt-label">
             <span>Undo</span>
             <small>Take back your last move — even a fatal one</small>
           </div>
@@ -131,12 +155,13 @@ export function OptionsModal({
         <div className="opt-records">
           <h3>Best times</h3>
           {PRESETS.map((d) => {
-            const t = records[d];
+            const rec = records[d];
             return (
               <div className="rec-row" key={d}>
                 <span className="rec-name">{DIFFICULTIES[d].label}</span>
-                <span className={'rec-time' + (t == null ? ' none' : '')}>
-                  {t == null ? '—' : pad3(t)}
+                <span className="rec-holder">{rec?.name ?? (rec ? 'Anonymous' : '')}</span>
+                <span className={'rec-time' + (rec == null ? ' none' : '')}>
+                  {rec == null ? '—' : pad3(rec.time)}
                 </span>
               </div>
             );

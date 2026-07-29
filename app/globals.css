@@ -335,6 +335,16 @@ h1 {
 .status.lose { color: #ff6b6b; text-shadow: 0 0 12px rgba(255, 107, 107, 0.4); }
 .best { color: #ffb23a; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .best .new-best { color: #4ade80; font-weight: 800; }
+/* Record holder: secondary to the time, and never wide enough to squeeze it. */
+.best .best-holder {
+  color: #8b93af;
+  font-size: 0.8em;
+  font-weight: 600;
+  max-width: 8ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* ---- Custom-board modal ---- */
 .modal-overlay {
@@ -400,10 +410,37 @@ h1 {
   border-color: rgba(255, 92, 120, 0.7);
   box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.5), 0 0 0 3px rgba(255, 92, 120, 0.2);
 }
+/* Text fields (e.g. the record name) need more room than a 3-digit number. */
+.field-wide { grid-template-columns: 1fr 148px; }
+.field-wide input { text-align: left; font-weight: 700; }
+.field-wide input::placeholder { color: #5c6483; font-weight: 600; }
+
 /* Hide the native number spinners for a cleaner look on the dark surface. */
 .field input::-webkit-outer-spin-button,
 .field input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .field input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+
+/* New-record banner: the difficulty beaten and the time that beat it. */
+.record-brag {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -4px 0 18px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255, 178, 58, 0.09);
+  border: 1px solid rgba(255, 178, 58, 0.28);
+}
+.record-diff { color: #cdd4ea; font-weight: 700; font-size: 0.92rem; }
+.record-brag .record-time {
+  color: #ffb23a;
+  font-weight: 900;
+  font-size: 1.5rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 14px rgba(255, 178, 58, 0.4);
+}
 
 .modal-summary {
   color: #8b93af;
@@ -491,6 +528,18 @@ h1 {
 }
 .opt-label span { display: block; font-weight: 700; color: #cdd4ea; font-size: 0.92rem; }
 .opt-label small { color: #7f89a8; font-size: 0.72rem; }
+/* Inline caveat under an option whose effect another option overrides. */
+.opt-note {
+  margin: -6px 0 2px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: rgba(255, 178, 58, 0.08);
+  border: 1px solid rgba(255, 178, 58, 0.2);
+  color: #b9a179;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.45;
+}
 
 /* Toggle switch (see components/Toggle.tsx). Uniform 3px gap around the thumb:
    width 44 = 3 + 18 + 20(travel) + 3; height 24 = 3 + 18 + 3. */
@@ -536,9 +585,22 @@ h1 {
   margin-bottom: 8px;
   font-weight: 800;
 }
-.rec-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 0.92rem; }
-.rec-name { color: #cdd4ea; font-weight: 600; }
-.rec-time { color: #ffb23a; font-weight: 800; font-variant-numeric: tabular-nums; }
+.rec-row { display: flex; align-items: baseline; gap: 10px; padding: 4px 0; font-size: 0.92rem; }
+.rec-name { color: #cdd4ea; font-weight: 600; flex-shrink: 0; }
+/* Who set it — takes the slack between the difficulty and the time, and
+   ellipsizes rather than pushing the time out of the row. */
+.rec-holder {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  color: #8b93af;
+  font-size: 0.78rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rec-time { color: #ffb23a; font-weight: 800; font-variant-numeric: tabular-nums; flex-shrink: 0; }
 .rec-time.none { color: #5c6483; }
 .link-btn {
   margin-top: 10px;

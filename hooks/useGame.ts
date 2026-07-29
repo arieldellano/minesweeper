@@ -5,7 +5,13 @@
 // (reveal / chord / toggleFlag / newGame / startCustom) and render its state.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { BoardConfig, DifficultyName, GameState } from '@/lib/types';
+import type {
+  BestRecord,
+  BoardConfig,
+  DifficultyName,
+  GameState,
+  PendingRecord,
+} from '@/lib/types';
 import { DEFAULT_CUSTOM, DIFFICULTIES, getConfig } from '@/lib/difficulty';
 import { chord as chordFn, clearTransientFlags, createGame, cycleFlag, revealCell } from '@/lib/game';
 import {
@@ -13,12 +19,16 @@ import {
   loadCustomConfig,
   loadGame,
   loadMuted,
+  loadPlayerName,
   loadSettings,
   saveCustomConfig,
   saveGame,
   saveMuted,
+  normalizeName,
+  savePlayerName,
   saveSettings,
   setBest,
+  setBestName,
 } from '@/lib/persistence';
 import { ensureAudio, setMuted, sound } from '@/lib/sound';
 
@@ -26,12 +36,15 @@ export interface UseGame {
   state: GameState;
   custom: BoardConfig;
   muted: boolean;
-  best: number | null;
+  best: BestRecord | null;
   isNewBest: boolean;
+  pendingRecord: PendingRecord | null;
+  playerName: string;
   dealNonce: number;
   winNonce: number;
   defaultDifficulty: DifficultyName;
   solvableOnly: boolean;
+  guaranteeOpening: boolean;
   undoEnabled: boolean;
   canUndo: boolean;
   newGame: (difficulty: DifficultyName) => void;
@@ -40,9 +53,12 @@ export interface UseGame {
   chord: (r: number, c: number) => void;
   toggleFlag: (r: number, c: number) => void;
   undo: () => void;
+  nameRecord: (name: string) => void;
+  skipRecordName: () => void;
   toggleMute: () => void;
   setDefaultDifficulty: (difficulty: DifficultyName) => void;
   setSolvableOnly: (value: boolean) => void;
+  setGuaranteeOpening: (value: boolean) => void;
   setUndoEnabled: (value: boolean) => void;
   refreshBest: () => void;
 }
@@ -57,12 +73,15 @@ export function useGame(): UseGame {
   );
   const [custom, setCustom] = useState<BoardConfig>(DEFAULT_CUSTOM);
   const [muted, setMutedState] = useState(false);
-  const [best, setBestState] = useState<number | null>(null);
+  const [best, setBestState] = useState<BestRecord | null>(null);
   const [isNewBest, setIsNewBest] = useState(false);
+  const [pendingRecord, setPendingRecord] = useState<PendingRecord | null>(null);
+  const [playerName, setPlayerNameState] = useState('');
   const [dealNonce, setDealNonce] = useState(0);
   const [winNonce, setWinNonce] = useState(0);
   const [defaultDifficulty, setDefaultDifficultyState] = useState<DifficultyName>('beginner');
   const [solvableOnly, setSolvableOnlyState] = useState(true);
+  const [guaranteeOpening, setGuaranteeOpeningState] = useState(false);
   const [undoEnabled, setUndoEnabledState] = useState(true);
   const [canUndo, setCanUndo] = useState(false);
 
@@ -75,10 +94,14 @@ export function useGame(): UseGame {
   mutedRef.current = muted;
   const solvableOnlyRef = useRef(solvableOnly);
   solvableOnlyRef.current = solvableOnly;
+  const guaranteeOpeningRef = useRef(guaranteeOpening);
+  guaranteeOpeningRef.current = guaranteeOpening;
   const defaultDifficultyRef = useRef(defaultDifficulty);
   defaultDifficultyRef.current = defaultDifficulty;
   const undoEnabledRef = useRef(undoEnabled);
   undoEnabledRef.current = undoEnabled;
+  const pendingRecordRef = useRef(pendingRecord);
+  pendingRecordRef.current = pendingRecord;
   // Undo stack of pre-move snapshots. In-memory only: a reload restores the
   // board but not its history.
   const historyRef = useRef<GameState[]>([]);
@@ -118,6 +141,7 @@ export function useGame(): UseGame {
     saveSettings({
       defaultDifficulty: defaultDifficultyRef.current,
       solvableOnly: solvableOnlyRef.current,
+      guaranteeOpening: guaranteeOpeningRef.current,
       undoEnabled: undoEnabledRef.current,
     });
   }, []);
@@ -134,8 +158,11 @@ export function useGame(): UseGame {
     setDefaultDifficultyState(settings.defaultDifficulty);
     setSolvableOnlyState(settings.solvableOnly);
     solvableOnlyRef.current = settings.solvableOnly;
+    setGuaranteeOpeningState(settings.guaranteeOpening);
+    guaranteeOpeningRef.current = settings.guaranteeOpening;
     setUndoEnabledState(settings.undoEnabled);
     undoEnabledRef.current = settings.undoEnabled;
+    setPlayerNameState(loadPlayerName());
 
     // Only restore a board the player has actually engaged with (revealed or
     // flagged). An untouched board is discarded so the default difficulty applies.
@@ -147,13 +174,21 @@ export function useGame(): UseGame {
     if (restored) {
       solvableOnlyRef.current = restored.solvableOnly;
       setSolvableOnlyState(restored.solvableOnly);
+      guaranteeOpeningRef.current = restored.guaranteeOpening;
+      setGuaranteeOpeningState(restored.guaranteeOpening);
       apply(restored);
       setBestState(getBest(restored.difficulty, c));
     } else {
       // No saved game: start a fresh board at the configured default difficulty.
       if (!freshRef.current) {
         const dd = settings.defaultDifficulty;
-        freshRef.current = createGame(dd, getConfig(dd, c), nextGameId(), settings.solvableOnly);
+        freshRef.current = createGame(
+          dd,
+          getConfig(dd, c),
+          nextGameId(),
+          settings.solvableOnly,
+          settings.guaranteeOpening
+        );
       }
       apply(freshRef.current);
       setBestState(getBest(freshRef.current.difficulty, c));
@@ -214,9 +249,20 @@ export function useGame(): UseGame {
         sound.win();
         setWinNonce((n) => n + 1);
         const prevBest = getBest(state.difficulty, customRef.current);
-        const isNew = prevBest == null || state.timer < prevBest;
-        if (isNew) setBest(state.difficulty, customRef.current, state.timer);
-        setBestState(isNew ? state.timer : prevBest);
+        const isNew = prevBest == null || state.timer < prevBest.time;
+        if (isNew) {
+          // Bank the record straight away as anonymous, then ask who set it —
+          // dismissing the prompt loses the name, never the time.
+          setBest(state.difficulty, customRef.current, state.timer);
+          setBestState({ time: state.timer, name: null });
+          setPendingRecord({
+            difficulty: state.difficulty,
+            config: customRef.current,
+            time: state.timer,
+          });
+        } else {
+          setBestState(prevBest);
+        }
         setIsNewBest(isNew);
       } else {
         sound.explode();
@@ -228,7 +274,13 @@ export function useGame(): UseGame {
   // ---- Actions -------------------------------------------------------------
   const startBoard = useCallback(
     (difficulty: DifficultyName, config: BoardConfig, silent = false) => {
-      const next = createGame(difficulty, config, nextGameId(), solvableOnlyRef.current);
+      const next = createGame(
+        difficulty,
+        config,
+        nextGameId(),
+        solvableOnlyRef.current,
+        guaranteeOpeningRef.current
+      );
       resetHistory(); // undo never reaches back into a previous board
       apply(next);
       setBestState(getBest(difficulty, customRef.current));
@@ -318,6 +370,22 @@ export function useGame(): UseGame {
     sound.undo();
   }, [apply]);
 
+  // ---- New-record naming ---------------------------------------------------
+  const nameRecord = useCallback((name: string) => {
+    const pending = pendingRecordRef.current;
+    setPendingRecord(null);
+    if (!pending) return;
+    const clean = normalizeName(name);
+    if (!clean) return; // blank submit is the same as skipping
+    if (!setBestName(pending.difficulty, pending.config, pending.time, clean)) return;
+    savePlayerName(clean);
+    setPlayerNameState(clean);
+    // Reflect it in the status bar, unless the record has moved on since.
+    setBestState((prev) => (prev && prev.time === pending.time ? { ...prev, name: clean } : prev));
+  }, []);
+
+  const skipRecordName = useCallback(() => setPendingRecord(null), []);
+
   const toggleMute = useCallback(() => {
     const nextMuted = !mutedRef.current;
     mutedRef.current = nextMuted;
@@ -359,6 +427,23 @@ export function useGame(): UseGame {
     [persistSettings]
   );
 
+  const setGuaranteeOpening = useCallback(
+    (value: boolean) => {
+      guaranteeOpeningRef.current = value;
+      setGuaranteeOpeningState(value);
+      persistSettings();
+      // Apply to the current board if its mines haven't been placed yet, so the
+      // toggle takes effect on the very next click without needing a new game.
+      setState((prev) => {
+        if (prev.minesPlaced || prev.guaranteeOpening === value) return prev;
+        const next = { ...prev, guaranteeOpening: value };
+        stateRef.current = next;
+        return next;
+      });
+    },
+    [persistSettings]
+  );
+
   const setUndoEnabled = useCallback(
     (value: boolean) => {
       undoEnabledRef.current = value;
@@ -387,17 +472,23 @@ export function useGame(): UseGame {
     winNonce,
     defaultDifficulty,
     solvableOnly,
+    guaranteeOpening,
     undoEnabled,
     canUndo,
+    pendingRecord,
+    playerName,
     newGame,
     startCustom,
     reveal,
     chord,
     toggleFlag,
     undo,
+    nameRecord,
+    skipRecordName,
     toggleMute,
     setDefaultDifficulty,
     setSolvableOnly,
+    setGuaranteeOpening,
     setUndoEnabled,
     refreshBest,
   };

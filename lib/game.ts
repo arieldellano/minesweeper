@@ -5,7 +5,9 @@
 import type { BoardConfig, CellState, DifficultyName, GameState } from './types';
 import { isSolvable } from './solver';
 
-// The first-clicked cell and its neighbors stay safe, AND the board is
+// The first-clicked cell always stays safe. Its neighbors stay safe too only
+// when the "guarantee an opening region" option is on; otherwise they may hold
+// mines and the opening click can land on a number. The board is also
 // regenerated until it is fully solvable by pure logic (see solver.ts).
 // Regeneration is bounded so the first click never hangs.
 const MAX_ATTEMPTS = 400;
@@ -19,7 +21,8 @@ export function createGame(
   difficulty: DifficultyName,
   config: BoardConfig,
   gameId: number,
-  solvableOnly = true
+  solvableOnly = true,
+  guaranteeOpening = false
 ): GameState {
   const grid: CellState[][] = [];
   for (let r = 0; r < config.rows; r++) {
@@ -40,6 +43,7 @@ export function createGame(
     gameOver: false,
     won: false,
     solvableOnly,
+    guaranteeOpening,
     gameId,
   };
 }
@@ -107,7 +111,12 @@ function placeMines(state: GameState, safeR: number, safeC: number): CellState[]
   const n = rows * cols;
   const safe = new Set<number>();
   safe.add(safeR * cols + safeC);
-  neighbors(rows, cols, safeR, safeC).forEach(([nr, nc]) => safe.add(nr * cols + nc));
+  // Clearing the whole 3x3 forces the opening tile to be a 0, so it floods a
+  // region open. Off by default: only the tile actually clicked is protected,
+  // and an opening click on a number reveals just that tile.
+  if (state.guaranteeOpening) {
+    neighbors(rows, cols, safeR, safeC).forEach(([nr, nc]) => safe.add(nr * cols + nc));
+  }
 
   let mines = randomLayout(n, totalMines, safe);
   if (state.solvableOnly) {
@@ -196,6 +205,10 @@ export function revealCell(state: GameState, r: number, c: number, popped = true
   let gained = 0;
   ed.set(r, c, { revealed: true, ...(popped ? { popped: true } : {}) });
   gained++;
+  // Only a 0 opens its region; a cell with mines around it uncovers just itself.
+  // That holds for the opening click too — though placeMines keeps the clicked
+  // cell's whole 3x3 safe, so in practice the first click is always a 0 and
+  // always cascades.
   if (cell.adjacent === 0) {
     neighbors(working.rows, working.cols, r, c).forEach(([nr, nc]) => {
       gained += floodFill(ed, working.rows, working.cols, nr, nc);
