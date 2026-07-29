@@ -2,7 +2,7 @@
 //
 // Given a mine layout and the first-click cell, simulate a player who only ever
 // acts on certainty. The board is "solvable" iff every safe cell can be revealed
-// this way, never a guess. board.js keeps regenerating layouts until one passes.
+// this way, never a guess. game.ts keeps regenerating layouts until one passes.
 //
 // Three deduction layers, cheapest first (we only escalate when stuck):
 //   1. trivial per-number rules            — O(n) per pass, resolves the bulk
@@ -15,24 +15,25 @@
 // is capped for speed), which only means some solvable boards are rejected and
 // regenerated — never that an unsolvable board slips through.
 
-const COMPONENT_CAP = 24;    // max frontier cells enumerated together
+const COMPONENT_CAP = 24; // max frontier cells enumerated together
 const SOLUTION_CAP = 200000; // bail out of a pathological component
 
-const nbrCache = new Map(); // (rows x cols) -> Int32Array[] neighbor lists
+const nbrCache = new Map<string, Int32Array[]>();
 
-function neighborTable(rows, cols) {
+function neighborTable(rows: number, cols: number): Int32Array[] {
   const key = rows + 'x' + cols;
-  let table = nbrCache.get(key);
-  if (table) return table;
+  const cached = nbrCache.get(key);
+  if (cached) return cached;
   const n = rows * cols;
-  table = new Array(n);
+  const table = new Array<Int32Array>(n);
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const list = [];
+      const list: number[] = [];
       for (let dr = -1; dr <= 1; dr++)
         for (let dc = -1; dc <= 1; dc++) {
           if (dr === 0 && dc === 0) continue;
-          const nr = r + dr, nc = c + dc;
+          const nr = r + dr,
+            nc = c + dc;
           if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) list.push(nr * cols + nc);
         }
       table[r * cols + c] = Int32Array.from(list);
@@ -42,16 +43,32 @@ function neighborTable(rows, cols) {
   return table;
 }
 
-// `mines` is a length rows*cols array/typed-array (1 = mine).
-export function isSolvable(mines, rows, cols, totalMines, startR, startC) {
+interface Constraint {
+  cells: number[];
+  need: number;
+}
+
+// `mines` is a length rows*cols array (1 = mine).
+export function isSolvable(
+  mines: Uint8Array,
+  rows: number,
+  cols: number,
+  totalMines: number,
+  startR: number,
+  startC: number
+): boolean {
   const n = rows * cols;
   const nbr = neighborTable(rows, cols);
 
   // Adjacent-mine counts (-1 marks a mine; only used for revealed safe cells).
   const adj = new Int16Array(n);
   for (let i = 0; i < n; i++) {
-    if (mines[i]) { adj[i] = -1; continue; }
-    let count = 0; const ns = nbr[i];
+    if (mines[i]) {
+      adj[i] = -1;
+      continue;
+    }
+    let count = 0;
+    const ns = nbr[i];
     for (let k = 0; k < ns.length; k++) if (mines[ns[k]]) count++;
     adj[i] = count;
   }
@@ -62,21 +79,28 @@ export function isSolvable(mines, rows, cols, totalMines, startR, startC) {
   let flaggedCount = 0;
 
   // Flood-reveal a proven-safe cell (opens its region if it is a 0).
-  const stack = [];
-  function reveal(i) {
+  const stack: number[] = [];
+  function reveal(i: number): void {
     if (revealed[i] || flagged[i]) return;
     stack.push(i);
     while (stack.length) {
-      const j = stack.pop();
+      const j = stack.pop()!;
       if (revealed[j] || flagged[j]) continue;
-      revealed[j] = 1; revealedCount++;
+      revealed[j] = 1;
+      revealedCount++;
       if (adj[j] === 0) {
         const ns = nbr[j];
-        for (let k = 0; k < ns.length; k++) if (!revealed[ns[k]] && !flagged[ns[k]]) stack.push(ns[k]);
+        for (let k = 0; k < ns.length; k++)
+          if (!revealed[ns[k]] && !flagged[ns[k]]) stack.push(ns[k]);
       }
     }
   }
-  function flag(i) { if (!flagged[i] && !revealed[i]) { flagged[i] = 1; flaggedCount++; } }
+  function flag(i: number): void {
+    if (!flagged[i] && !revealed[i]) {
+      flagged[i] = 1;
+      flaggedCount++;
+    }
+  }
 
   reveal(startR * cols + startC);
 
@@ -88,7 +112,8 @@ export function isSolvable(mines, rows, cols, totalMines, startR, startC) {
     for (let i = 0; i < n; i++) {
       if (!revealed[i] || adj[i] <= 0) continue;
       const ns = nbr[i];
-      let f = 0; const unknown = [];
+      let f = 0;
+      const unknown: number[] = [];
       for (let k = 0; k < ns.length; k++) {
         const j = ns[k];
         if (flagged[j]) f++;
@@ -96,34 +121,48 @@ export function isSolvable(mines, rows, cols, totalMines, startR, startC) {
       }
       if (unknown.length === 0) continue;
       const need = adj[i] - f;
-      if (need === 0) { for (const j of unknown) { reveal(j); } progress = true; }
-      else if (need === unknown.length) { for (const j of unknown) flag(j); progress = true; }
+      if (need === 0) {
+        for (const j of unknown) reveal(j);
+        progress = true;
+      } else if (need === unknown.length) {
+        for (const j of unknown) flag(j);
+        progress = true;
+      }
     }
     if (progress) continue;
 
     // (2) tank solver over connected frontier components
-    if (tankDeduce()) { progress = true; continue; }
+    if (tankDeduce()) {
+      progress = true;
+      continue;
+    }
 
     // (3) global mine-count endgame
     const remaining = totalMines - flaggedCount;
-    const unknownCells = [];
+    const unknownCells: number[] = [];
     for (let i = 0; i < n; i++) if (!revealed[i] && !flagged[i]) unknownCells.push(i);
     if (unknownCells.length) {
-      if (remaining === 0) { for (const j of unknownCells) reveal(j); progress = true; }
-      else if (remaining === unknownCells.length) { for (const j of unknownCells) flag(j); progress = true; }
+      if (remaining === 0) {
+        for (const j of unknownCells) reveal(j);
+        progress = true;
+      } else if (remaining === unknownCells.length) {
+        for (const j of unknownCells) flag(j);
+        progress = true;
+      }
     }
   }
 
   return revealedCount === n - totalMines;
 
   // --- tank solver: find cells forced mine/safe across all valid configs ---
-  function tankDeduce() {
-    const constraints = []; // { cells:[idx...], need }
-    const frontierSet = new Set();
+  function tankDeduce(): boolean {
+    const constraints: Constraint[] = [];
+    const frontierSet = new Set<number>();
     for (let i = 0; i < n; i++) {
       if (!revealed[i] || adj[i] <= 0) continue;
       const ns = nbr[i];
-      let f = 0; const cells = [];
+      let f = 0;
+      const cells: number[] = [];
       for (let k = 0; k < ns.length; k++) {
         const j = ns[k];
         if (flagged[j]) f++;
@@ -137,22 +176,36 @@ export function isSolvable(mines, rows, cols, totalMines, startR, startC) {
 
     // Group frontier cells into components connected through shared constraints.
     const frontier = [...frontierSet];
-    const pos = new Map(); frontier.forEach((j, k) => pos.set(j, k));
+    const pos = new Map<number, number>();
+    frontier.forEach((j, k) => pos.set(j, k));
     const parent = frontier.map((_, k) => k);
-    const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+    const find = (x: number): number => {
+      while (parent[x] !== x) {
+        parent[x] = parent[parent[x]];
+        x = parent[x];
+      }
+      return x;
+    };
     for (const con of constraints) {
-      const a = pos.get(con.cells[0]);
-      for (let k = 1; k < con.cells.length; k++) { const b = pos.get(con.cells[k]); parent[find(a)] = find(b); }
+      const a = pos.get(con.cells[0])!;
+      for (let k = 1; k < con.cells.length; k++) {
+        const b = pos.get(con.cells[k])!;
+        parent[find(a)] = find(b);
+      }
     }
-    const compCells = new Map();
-    const compCons = new Map();
+    const compCells = new Map<number, number[]>();
+    const compCons = new Map<number, Constraint[]>();
     for (let k = 0; k < frontier.length; k++) {
       const root = find(k);
-      (compCells.get(root) || compCells.set(root, []).get(root)).push(frontier[k]);
+      let list = compCells.get(root);
+      if (!list) compCells.set(root, (list = []));
+      list.push(frontier[k]);
     }
     for (const con of constraints) {
-      const root = find(pos.get(con.cells[0]));
-      (compCons.get(root) || compCons.set(root, []).get(root)).push(con);
+      const root = find(pos.get(con.cells[0])!);
+      let list = compCons.get(root);
+      if (!list) compCons.set(root, (list = []));
+      list.push(con);
     }
 
     let any = false;
@@ -162,8 +215,14 @@ export function isSolvable(mines, rows, cols, totalMines, startR, startC) {
       if (!res) continue; // enumeration bailed — stay sound, skip
       const { canMine, canSafe } = res;
       for (let k = 0; k < cells.length; k++) {
-        if (!canMine[k]) { reveal(cells[k]); any = true; }      // safe in every config
-        else if (!canSafe[k]) { flag(cells[k]); any = true; }   // mine in every config
+        if (!canMine[k]) {
+          reveal(cells[k]);
+          any = true;
+        } // safe in every config
+        else if (!canSafe[k]) {
+          flag(cells[k]);
+          any = true;
+        } // mine in every config
       }
     }
     return any;
@@ -171,14 +230,24 @@ export function isSolvable(mines, rows, cols, totalMines, startR, startC) {
 
   // Enumerate every valid mine assignment of one component; return per-cell
   // canMine/canSafe flags, or null if it bailed (too many solutions).
-  function enumerate(cells, cons) {
+  function enumerate(
+    cells: number[],
+    cons: Constraint[]
+  ): { canMine: Uint8Array; canSafe: Uint8Array } | null {
     const m = cells.length;
-    const cellPos = new Map(); cells.forEach((j, k) => cellPos.set(j, k));
+    const cellPos = new Map<number, number>();
+    cells.forEach((j, k) => cellPos.set(j, k));
     const localCons = cons.map((con) => ({
-      cells: con.cells.map((j) => cellPos.get(j)), need: con.need, sum: 0, rem: 0,
+      cells: con.cells.map((j) => cellPos.get(j)!),
+      need: con.need,
+      sum: 0,
+      rem: 0,
     }));
-    const cellCons = Array.from({ length: m }, () => []);
-    localCons.forEach((con, ci) => { con.rem = con.cells.length; con.cells.forEach((lc) => cellCons[lc].push(ci)); });
+    const cellCons: number[][] = Array.from({ length: m }, () => []);
+    localCons.forEach((con, ci) => {
+      con.rem = con.cells.length;
+      con.cells.forEach((lc) => cellCons[lc].push(ci));
+    });
 
     const assign = new Uint8Array(m);
     const canMine = new Uint8Array(m);
@@ -187,27 +256,52 @@ export function isSolvable(mines, rows, cols, totalMines, startR, startC) {
     let solutions = 0;
     let bailed = false;
 
-    function recordLeaf() {
+    function recordLeaf(): void {
       solutions++;
       for (let k = 0; k < m; k++) {
-        if (assign[k]) { if (!canMine[k]) { canMine[k] = 1; if (canSafe[k]) undetermined--; } }
-        else if (!canSafe[k]) { canSafe[k] = 1; if (canMine[k]) undetermined--; }
+        if (assign[k]) {
+          if (!canMine[k]) {
+            canMine[k] = 1;
+            if (canSafe[k]) undetermined--;
+          }
+        } else if (!canSafe[k]) {
+          canSafe[k] = 1;
+          if (canMine[k]) undetermined--;
+        }
       }
     }
 
-    function rec(i) {
+    function rec(i: number): void {
       if (bailed || undetermined === 0) return; // nothing more can be forced
-      if (i === m) { recordLeaf(); if (solutions > SOLUTION_CAP) bailed = true; return; }
+      if (i === m) {
+        recordLeaf();
+        if (solutions > SOLUTION_CAP) bailed = true;
+        return;
+      }
       for (let v = 0; v <= 1; v++) {
         const cs = cellCons[i];
-        for (let t = 0; t < cs.length; t++) { const con = localCons[cs[t]]; con.sum += v; con.rem--; }
+        for (let t = 0; t < cs.length; t++) {
+          const con = localCons[cs[t]];
+          con.sum += v;
+          con.rem--;
+        }
         let ok = true;
         for (let t = 0; t < cs.length; t++) {
           const con = localCons[cs[t]];
-          if (con.sum > con.need || con.sum + con.rem < con.need) { ok = false; break; }
+          if (con.sum > con.need || con.sum + con.rem < con.need) {
+            ok = false;
+            break;
+          }
         }
-        if (ok) { assign[i] = v; rec(i + 1); }
-        for (let t = 0; t < cs.length; t++) { const con = localCons[cs[t]]; con.sum -= v; con.rem++; }
+        if (ok) {
+          assign[i] = v;
+          rec(i + 1);
+        }
+        for (let t = 0; t < cs.length; t++) {
+          const con = localCons[cs[t]];
+          con.sum -= v;
+          con.rem++;
+        }
         if (bailed) return;
       }
     }
