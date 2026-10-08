@@ -169,3 +169,7 @@ single `<canvas>` overlay (`components/DealCanvas.tsx`), not a keyframe animatio
 per cell. One tile is pre-rendered to a sprite and blitted per tile per frame, so
 cost is flat whether the board has 81 tiles or 1200. The real DOM cells stay
 hidden under `.board.dealing` until the canvas finishes.
+
+## License
+
+[MIT](LICENSE).

@@ -2,6 +2,7 @@
   "name": "minesweeper",
   "version": "1.0.0",
   "private": true,
+  "license": "MIT",
   "description": "Modular Minesweeper — no-guess boards, custom difficulty, canvas deal-in, persistence. Next.js + TypeScript.",
   "scripts": {
     "dev": "next dev",
